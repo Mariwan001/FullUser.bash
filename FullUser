@@ -1,0 +1,231 @@
+#!/bin/bash
+
+# Colors
+CYAN='\033[0;36m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+MAGENTA='\033[0;35m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+me=${SUDO_USER:-$(whoami)}
+
+usage() {
+cat <<-USAGE
+${BOLD}FullUser${NC} - comprehensive user & system info
+Usage: FullUser [OPTIONS]
+  --help     show this help
+  --simple   minimal output (no colors)
+  --json     output in JSON format
+  --export   export to file
+USAGE
+}
+
+# Parse arguments
+SIMPLE_MODE=false
+JSON_MODE=false
+EXPORT_MODE=false
+
+case "$1" in
+    --help|-h)
+        usage
+        exit 0
+        ;;
+    --simple)
+        SIMPLE_MODE=true
+        CYAN=''; GREEN=''; YELLOW=''; RED=''; BLUE=''; MAGENTA=''; BOLD=''; NC=''
+        ;;
+    --json)
+        JSON_MODE=true
+        ;;
+    --export)
+        EXPORT_MODE=true
+        ;;
+esac
+
+# Gather REAL information
+hostname=$(hostname)
+uptime_info=$(uptime -p 2>/dev/null | sed 's/up //' || uptime | awk -F'up ' '{print $2}' | awk -F',' '{print $1}' | xargs)
+os_version=$(grep -m1 'PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"' || echo "Unknown")
+kernel=$(uname -r)
+shell_name=$(basename "$SHELL")
+home_dir="$HOME"
+user_id=$(id -u)
+group_id=$(id -g)
+groups_list=$(groups | tr ' ' ', ')
+
+# Timezone and time
+timezone=$(timedatectl 2>/dev/null | grep 'Time zone' | awk '{print $3}' || cat /etc/timezone 2>/dev/null || date +%Z)
+current_time=$(date '+%Y-%m-%d %H:%M:%S %Z')
+date_human=$(date '+%B %d, %Y at %I:%M %p')
+
+# REAL Login information - with proper error handling
+if command -v last >/dev/null 2>&1; then
+    # Get actual login count from wtmp
+    login_count=$(last -F "$me" 2>/dev/null | grep -c "^$me " || echo "0")
+    
+    # Get first login (oldest entry)
+    first_login_raw=$(last -F "$me" 2>/dev/null | grep "^$me " | tail -1)
+    if [ -n "$first_login_raw" ]; then
+        first_login=$(echo "$first_login_raw" | awk '{print $5, $6, $7, $8, $9}')
+    else
+        first_login="No login history available"
+    fi
+    
+    # Get last login (most recent completed session, not current)
+    last_login_raw=$(last -F "$me" 2>/dev/null | grep "^$me " | sed -n '2p')
+    if [ -n "$last_login_raw" ]; then
+        last_login=$(echo "$last_login_raw" | awk '{print $5, $6, $7, $8, $9}')
+    else
+        last_login="This is first session"
+    fi
+else
+    login_count="N/A"
+    first_login="last command not available"
+    last_login="last command not available"
+fi
+
+# Current session info
+current_session_raw=$(who -u | grep "$me" | head -1)
+if [ -n "$current_session_raw" ]; then
+    current_session=$(echo "$current_session_raw" | awk '{print $3, $4}')
+    session_pid=$(echo "$current_session_raw" | awk '{print $6}')
+else
+    current_session=$(date '+%H:%M %b %d')
+    session_pid="$$"
+fi
+
+# REAL Resource information
+mem_total=$(free -h 2>/dev/null | awk '/^Mem:/ {print $2}')
+mem_used=$(free -h 2>/dev/null | awk '/^Mem:/ {print $3}')
+mem_percent=$(free 2>/dev/null | awk '/^Mem:/ {printf "%.0f", ($3/$2)*100}')
+mem_info="${mem_used} / ${mem_total} (${mem_percent}%)"
+
+# Disk usage - ROOT only (fast and reliable)
+disk_root=$(df -h / 2>/dev/null | awk 'NR==2 {print $3 " / " $2 " (" $5 ")"}')
+
+# CPU info
+cpu_load=$(uptime | awk -F'load average:' '{print $2}' | xargs)
+cpu_cores=$(nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo)
+
+# Process count
+process_count=$(ps -u "$me" --no-headers 2>/dev/null | wc -l)
+
+# Network information - REAL IP
+ip_address=$(hostname -I 2>/dev/null | awk '{print $1}')
+[ -z "$ip_address" ] && ip_address=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')
+[ -z "$ip_address" ] && ip_address="No network"
+
+# Typewriter effect function
+typewriter() {
+    local text="$1"
+    local delay="${2:-0.02}"
+    
+    # Strip color codes for character counting
+    local plain_text=$(echo -e "$text" | sed -r "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGK]//g")
+    
+    for (( i=0; i<${#plain_text}; i++ )); do
+        printf "%s" "${plain_text:$i:1}"
+        sleep "$delay"
+    done
+    printf "\n"
+}
+
+# JSON output
+if [ "$JSON_MODE" = true ]; then
+    cat <<-JSON
+{
+  "user": {
+    "username": "$me",
+    "uid": $user_id,
+    "gid": $group_id,
+    "shell": "$shell_name",
+    "home": "$home_dir",
+    "groups": "$groups_list"
+  },
+  "system": {
+    "hostname": "$hostname",
+    "os": "$os_version",
+    "kernel": "$kernel",
+    "uptime": "$uptime_info",
+    "timezone": "$timezone",
+    "cpu_cores": $cpu_cores
+  },
+  "session": {
+    "current_time": "$current_time",
+    "login_count": "$login_count",
+    "first_login": "$first_login",
+    "last_login": "$last_login",
+    "current_session": "$current_session",
+    "session_pid": "$session_pid"
+  },
+  "resources": {
+    "memory": "$mem_info",
+    "disk_root": "$disk_root",
+    "cpu_load": "$cpu_load",
+    "cpu_cores": $cpu_cores,
+    "processes": $process_count,
+    "ip_address": "$ip_address"
+  }
+}
+JSON
+    exit 0
+fi
+
+# Normal output with typewriter effect
+echo
+typewriter "╔════════════════════════════════════════════════════════════╗" 0.005
+typewriter "║              USER & SYSTEM INFORMATION                     ║" 0.005
+typewriter "╚════════════════════════════════════════════════════════════╝" 0.005
+echo
+
+typewriter "👤 USER DETAILS" 0.03
+echo -e "${BOLD}───────────────────────────────────────────────────────────${NC}"
+printf "  ${CYAN}Username${NC}      : ${GREEN}%s${NC}\n" "$me"
+printf "  ${CYAN}UID / GID${NC}     : %s / %s\n" "$user_id" "$group_id"
+printf "  ${CYAN}Shell${NC}         : %s\n" "$shell_name"
+printf "  ${CYAN}Home Dir${NC}      : %s\n" "$home_dir"
+printf "  ${CYAN}Groups${NC}        : %s\n" "$groups_list"
+echo
+
+typewriter "💻 SYSTEM INFO" 0.03
+echo -e "${BOLD}───────────────────────────────────────────────────────────${NC}"
+printf "  ${CYAN}Hostname${NC}      : ${GREEN}%s${NC}\n" "$hostname"
+printf "  ${CYAN}OS Version${NC}    : %s\n" "$os_version"
+printf "  ${CYAN}Kernel${NC}        : %s\n" "$kernel"
+printf "  ${CYAN}CPU Cores${NC}     : %s\n" "$cpu_cores"
+printf "  ${CYAN}Uptime${NC}        : %s\n" "$uptime_info"
+printf "  ${CYAN}Timezone${NC}      : %s\n" "$timezone"
+printf "  ${CYAN}Current Time${NC}  : ${BLUE}%s${NC}\n" "$date_human"
+echo
+
+typewriter "🔐 SESSION INFO" 0.03
+echo -e "${BOLD}───────────────────────────────────────────────────────────${NC}"
+printf "  ${CYAN}Session PID${NC}   : %s\n" "$session_pid"
+printf "  ${CYAN}Login Count${NC}   : %s total logins\n" "$login_count"
+printf "  ${CYAN}First Login${NC}   : %s\n" "$first_login"
+printf "  ${CYAN}Last Login${NC}    : %s\n" "$last_login"
+printf "  ${CYAN}This Session${NC}  : %s\n" "$current_session"
+printf "  ${CYAN}IP Address${NC}    : %s\n" "$ip_address"
+echo
+
+typewriter "📊 RESOURCE USAGE" 0.03
+echo -e "${BOLD}───────────────────────────────────────────────────────────${NC}"
+printf "  ${CYAN}Memory${NC}        : %s\n" "$mem_info"
+printf "  ${CYAN}Root Disk${NC}     : %s\n" "$disk_root"
+printf "  ${CYAN}CPU Load${NC}      : %s\n" "$cpu_load"
+printf "  ${CYAN}Processes${NC}     : %s active\n" "$process_count"
+echo
+
+echo -e "${BOLD}───────────────────────────────────────────────────────────${NC}"
+echo -e "${MAGENTA}Created by Mariwan Iraj${NC}"
+echo
+
+# Export option
+if [ "$EXPORT_MODE" = true ]; then
+    output_file="$HOME/fulluser_$(date +%Y%m%d_%H%M%S).txt"
+    "$0" --simple > "$output_file" 2>&1
+    echo -e "${GREEN}✓${NC} Exported to: $output_file"
+fi

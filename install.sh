@@ -18,7 +18,8 @@ fi
 
 # Download FullUser script
 echo "📥 Downloading FullUser..."
-curl -sSL https://raw.githubusercontent.com/mariwan001/FullUser/main/FullUser -o /usr/local/bin/FullUser
+# --- THIS IS THE CORRECTED LINE ---
+curl -sSL https://raw.githubusercontent.com/mariwan001/FullUser.bash/main/FullUser.bash -o /usr/local/bin/FullUser
 
 # Make it executable
 echo "🔧 Setting permissions..."

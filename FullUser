@@ -61,30 +61,17 @@ timezone=$(timedatectl 2>/dev/null | grep 'Time zone' | awk '{print $3}' || cat 
 current_time=$(date '+%Y-%m-%d %H:%M:%S %Z')
 date_human=$(date '+%B %d, %Y at %I:%M %p')
 
-# REAL Login information - with proper error handling
-if command -v last >/dev/null 2>&1; then
-    # Get actual login count from wtmp
+# REAL Login information - fixed
+if [ -f /var/log/wtmp ]; then
     login_count=$(last -F "$me" 2>/dev/null | grep -c "^$me " || echo "0")
-    
-    # Get first login (oldest entry)
-    first_login_raw=$(last -F "$me" 2>/dev/null | grep "^$me " | tail -1)
-    if [ -n "$first_login_raw" ]; then
-        first_login=$(echo "$first_login_raw" | awk '{print $5, $6, $7, $8, $9}')
-    else
-        first_login="No login history available"
-    fi
-    
-    # Get last login (most recent completed session, not current)
-    last_login_raw=$(last -F "$me" 2>/dev/null | grep "^$me " | sed -n '2p')
-    if [ -n "$last_login_raw" ]; then
-        last_login=$(echo "$last_login_raw" | awk '{print $5, $6, $7, $8, $9}')
-    else
-        last_login="This is first session"
-    fi
+    first_login=$(last -F "$me" 2>/dev/null | tail -1 | awk '{print $5, $6, $7, $8, $9}')
+    last_login=$(last -F "$me" 2>/dev/null | grep "^$me " | sed -n '1p' | awk '{print $5, $6, $7, $8, $9}')
+    [ -z "$first_login" ] && first_login="No login history"
+    [ -z "$last_login" ] && last_login="This is first session"
 else
-    login_count="N/A"
-    first_login="last command not available"
-    last_login="last command not available"
+    login_count="0"
+    first_login="No wtmp file"
+    last_login="No wtmp file"
 fi
 
 # Current session info
